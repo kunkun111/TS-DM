@@ -72,6 +72,7 @@ def CES_method(data, ini_train_size, win_size, seeds, name):
     np.random.seed(seeds)
     
     data = data.values
+    # data = data[:500, :]
     
     x1 = data[0:ini_train_size, :-1]
     y1 = data[0:ini_train_size, -1]
@@ -97,7 +98,6 @@ def CES_method(data, ini_train_size, win_size, seeds, name):
     
     
    
-    
     # k-fold
     kf = KFold(int((data.shape[0] - ini_train_size) / win_size))
     stream = data[ini_train_size:, :]
@@ -110,6 +110,12 @@ def CES_method(data, ini_train_size, win_size, seeds, name):
     test_deviance2 = np.zeros((100,), dtype = np.float64)
     
     pred = np.empty(0)
+    
+    acc1_pre = 0
+    acc2_pre = 0
+    acc_df = []
+    term = 0
+    
     
     # model learning
     for train_index, test_index in tqdm(kf.split(stream), total = kf.get_n_splits(), desc = "#batch"):
@@ -157,10 +163,7 @@ def CES_method(data, ini_train_size, win_size, seeds, name):
         # evaluation
         acc_1 = metrics.accuracy_score(y_test, y_pred_1.T)
         f1_1 = metrics.f1_score(y_test, y_pred_1.T, average='macro')
-        
-        # for i, y_pred1 in enumerate(model1.staged_predict(x_test)):
-        #     # clf.loss_ assumes that y_test[i] in {0, 1}
-        #     test_deviance1[i] = model1.loss_(y_test, y_pred1)
+
             
         # test model2 on the drift data
         y_pred_2 = model2.predict(x_test)
@@ -170,39 +173,30 @@ def CES_method(data, ini_train_size, win_size, seeds, name):
         # evaluation
         acc_2 = metrics.accuracy_score(y_test, y_pred_2.T)
         f1_2 = metrics.f1_score(y_test, y_pred_2.T, average='macro')
-        
-        # for i, y_pred2 in enumerate(model2.staged_predict(x_test)):
-        #     # clf.loss_ assumes that y_test[i] in {0, 1}
-        #     test_deviance2[i] = model2.loss_(y_test, y_pred2)
-        
-        # print(test_deviance1)
-        # print(test_deviance2)
-        
-        # zz = stats.kstest(test_deviance1, test_deviance2)
-        # print(zz)
-        
-        # fig = plt.figure(figsize=(6, 6))
-        # plt.plot(np.arange(100) + 1, test_deviance1, "r-", label="Model1 Test Set Deviance")
-        # plt.plot(np.arange(100) + 1, test_deviance2, "b-", label="Model2 Test Set Deviance")
-        # plt.legend(loc="upper right")
-        # plt.xlabel("Boosting Iterations")
-        # plt.ylabel("Deviance")
-        # fig.tight_layout()
-        # plt.show()
+
         
         if acc_1 > acc_2:
                 
             x1 = np.vstack((x1, x_test))
             y1 = np.hstack((y1, y_test))
             
-            if x1.shape[0] > 5000:
-                x1 = x1[:-5000, :]
-                y1 = y1[:-5000]
+            if x1.shape[0] > 1000:
                 
+                if acc_1 >= acc1_pre:
+                    
+                    x1 = x1[-1000:, :]
+                    y1 = y1[-1000:]
+                    
+                else:
+                
+                    x1 = x_test
+                    y1 = y_test
             
             # retrain the model 1
             model1 = GradientBoostingRegressor(subsample = 0.8)
             model1.fit(x1, y1)
+            
+            acc1_pre = acc_1
             
             batch_acc.append(acc_1)
             batch_f1.append(f1_1)
@@ -214,32 +208,34 @@ def CES_method(data, ini_train_size, win_size, seeds, name):
             if idx_drift == 0:
                 
                 # combine historical data samples
-                
-                # x2 = x_test
-                # y2 = y_test
-                
                 x2 = np.vstack((x2, x_test))
                 y2 = np.hstack((y2, y_test))
                 
             else:
                 
                 # combine drift historical data samples
-                # x2 = x_test[idx_drift:, :]
-                # y2 = y_test[idx_drift:]
-                
                 x2 = np.vstack((x2, x_test[idx_drift:, :]))
                 y2 = np.hstack((y2, y_test[idx_drift:]))   
             
             
-            if x2.shape[0] > 5000:
-                x2 = x2[:-5000, :]
-                y2 = y2[:-5000]
+            if x2.shape[0] > 1000:
                 
+                if acc_2 >= acc2_pre:
+                    
+                    x2 = x2[-1000:, :]
+                    y2 = y2[-1000:]
+                    
+                else:
                 
+                    x2 = x_test
+                    y2 = y_test
                 
+            
             # retrain the model 2
             model2 = GradientBoostingRegressor(subsample = 0.8)
-            model2.fit(x2, y2)    
+            model2.fit(x2, y2)
+            
+            acc2_pre = acc_2    
                 
             batch_acc.append(acc_2)
             batch_f1.append(f1_2)
@@ -269,9 +265,10 @@ def CES_method(data, ini_train_size, win_size, seeds, name):
 if __name__ == '__main__':
     
     
-    path = 'synthetic data/'
+   # path = 'C:/Users/Administrator/Desktop/Work4/data/synthetic data/'
+    path = '/home/kunwang/Data/Work4/data/synthetic data/'
 
-    datasets = ['SEAa', 'RTG', 'RBF', 'RBFr', 'AGRa', 'HYP']
+    datasets = ['SEAa', 'RTG', 'RBF', 'RBFr', 'AGRa', 'HYP', 'Sine', 'STAGGER']
 
     
     
@@ -310,7 +307,8 @@ if __name__ == '__main__':
     
     
     
-    
+
+
 
 
 

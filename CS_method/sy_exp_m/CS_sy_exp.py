@@ -28,7 +28,7 @@ def load_arff(path, dataset_name, seeds):
 
 def CS_method(data, ini_train_size, win_size, seeds, name):
     
-    
+    np.random.seed(0)
     data = data.values
     
     x1 = data[0:ini_train_size, :-1]
@@ -43,7 +43,6 @@ def CS_method(data, ini_train_size, win_size, seeds, name):
     model1.fit(x1, y1)
     
     y_pred_ini = model1.predict(x2)
-    # y_pred_ini = (y_pred_ini >= 0.5)
     
     # initial accuracy
     acc_ini = metrics.accuracy_score(y2, y_pred_ini.T)
@@ -70,6 +69,12 @@ def CS_method(data, ini_train_size, win_size, seeds, name):
     y_test_cum = y2
     
     
+    acc1_pre = 0
+    acc2_pre = 0
+    acc_df = []
+    term = 0
+    
+    
     # model learning
     for train_index, test_index in tqdm(kf.split(stream), total = kf.get_n_splits(), desc = "#batch"):
             
@@ -79,7 +84,6 @@ def CS_method(data, ini_train_size, win_size, seeds, name):
         
         # test model 1
         y_pred_1 = model1.predict(x_test)
-        # y_pred_1 = (y_pred_1 >= 0.5)
         
         acc_1 = metrics.accuracy_score(y_test, y_pred_1.T)
         f1_1 = metrics.f1_score(y_test, y_pred_1.T, average='macro')
@@ -87,7 +91,6 @@ def CS_method(data, ini_train_size, win_size, seeds, name):
         
         # test model 2
         y_pred_2 = model2.predict(x_test)
-        # y_pred_2 = (y_pred_2 >= 0.5)
         
         acc_2 = metrics.accuracy_score(y_test, y_pred_2.T)
         f1_2 = metrics.f1_score(y_test, y_pred_2.T, average='macro')
@@ -102,22 +105,29 @@ def CS_method(data, ini_train_size, win_size, seeds, name):
             y_pred_cum = np.hstack((y_pred_cum, y_pred_1))
             # y_test_cum = np.hstack((y_test_cum, y_test))
             
-            # cum_acc.append(metrics.accuracy_score(y_test_cum, y_pred_cum.T))
-            # cum_f1.append(metrics.f1_score(y_test_cum, y_pred_cum.T, average='macro'))
             
             # combine historical chunk
             x1 = np.vstack((x1, x_test))
             y1 = np.hstack((y1, y_test))
 
             
-            if x1.shape[0] > 5000:
-                x1 = x1[:-5000, :]
-                y1 = y1[:-5000]
-            
+            if x1.shape[0] > 1000:
+                
+                if acc_1 >= acc1_pre:
+                    
+                    x1 = x1[-1000:, :]
+                    y1 = y1[-1000:]
+                    
+                else:
+                
+                    x1 = x_test
+                    y1 = y_test
             
             # retrain the model 1
             model1 = GradientBoostingClassifier(subsample = 0.8)
             model1.fit(x1, y1)
+            
+            acc1_pre = acc_1
 
 
         
@@ -127,22 +137,30 @@ def CS_method(data, ini_train_size, win_size, seeds, name):
             
             y_pred_cum = np.hstack((y_pred_cum, y_pred_2))
             # y_test_cum = np.hstack((y_test_cum, y_test))
-            
-            # cum_acc.append(metrics.accuracy_score(y_test_cum, y_pred_cum.T))
-            # cum_f1.append(metrics.f1_score(y_test_cum, y_pred_cum.T, average='macro'))
+
             
             # combine historical chunk
             x2 = np.vstack((x2, x_test))
             y2 = np.hstack((y2, y_test))
             
-            if x2.shape[0] > 5000:
-                x2 = x2[:-5000, :]
-                y2 = y2[:-5000]
-            
+            if x2.shape[0] > 1000:
+                
+                if acc_2 >= acc2_pre:
+                    
+                    x2 = x2[-1000:, :]
+                    y2 = y2[-1000:]
+                    
+                else:
+                
+                    x2 = x_test
+                    y2 = y_test
+                
             
             # retrain the model 2
             model2 = GradientBoostingClassifier(subsample = 0.8)
             model2.fit(x2, y2)
+            
+            acc2_pre = acc_2
             
     Y = data[ini_train_size:,-1]
     acc = metrics.accuracy_score(Y, y_pred_cum)
@@ -167,10 +185,10 @@ def CS_method(data, ini_train_size, win_size, seeds, name):
 if __name__ == '__main__':
     
     
-    path = 'synthetic data/'
+   # path = 'C:/Users/Administrator/Desktop/Work4/data/synthetic data/'
+    path = '/home/kunwang/Data/Work4/data/synthetic data/'
     
-    datasets = ['LEDa', 'LEDg']
-
+    datasets = ['LEDa', 'LEDg', 'Waveform']
     
     for i in range (len(datasets)):
         

@@ -65,12 +65,22 @@ def CES_method(data, ini_train_size, win_size, seeds, name):
     np.random.seed(seeds)
     
     data = data.values
+    # data = data[:500, :]
     
     x1 = data[0:ini_train_size, :-1]
     y1 = data[0:ini_train_size, -1]
-    
+          
     x2 = np.zeros((x1.shape[0], x1.shape[1]))
     y2 = np.zeros(x1.shape[0])
+    
+    
+    # avoid 1 class
+    lab1 = np.argmax(y1)
+    lab2 = np.argmin(y1)
+            
+            
+    lab_x = np.vstack((x1[lab1, :], x1[lab2, :]))
+    lab_y = np.hstack((y1[lab1], y1[lab2]))
     
     
     # build initial model for drift detection
@@ -88,7 +98,6 @@ def CES_method(data, ini_train_size, win_size, seeds, name):
     model2.fit(x1, y1)
     
     
-   
     
     # k-fold
     kf = KFold(int((data.shape[0] - ini_train_size) / win_size))
@@ -102,6 +111,12 @@ def CES_method(data, ini_train_size, win_size, seeds, name):
     test_deviance2 = np.zeros((100,), dtype = np.float64)
     
     pred = np.empty(0)
+    
+    acc1_pre = 0
+    acc2_pre = 0
+    acc_df = []
+    term = 0
+    
     
     # model learning
     for train_index, test_index in tqdm(kf.split(stream), total = kf.get_n_splits(), desc = "#batch"):
@@ -123,6 +138,9 @@ def CES_method(data, ini_train_size, win_size, seeds, name):
         model_ini = GradientBoostingClassifier(subsample = 0.8)
         model_ini.fit(x_test, y_test)
         
+        # avoid 1 class
+        # model_ini.fit(np.vstack((lab_x, x_test)), np.hstack((lab_y, y_test)))
+        
         
         # test model1
         y_pred_1 = model1.predict(x_test)
@@ -133,10 +151,7 @@ def CES_method(data, ini_train_size, win_size, seeds, name):
         # evaluation
         acc_1 = metrics.accuracy_score(y_test, y_pred_1.T)
         f1_1 = metrics.f1_score(y_test, y_pred_1.T, average='macro')
-        
-        # for i, y_pred1 in enumerate(model1.staged_predict(x_test)):
-        #     # clf.loss_ assumes that y_test[i] in {0, 1}
-        #     test_deviance1[i] = model1.loss_(y_test, y_pred1)
+
             
         # test model2 on the drift data
         y_pred_2 = model2.predict(x_test)
@@ -146,25 +161,7 @@ def CES_method(data, ini_train_size, win_size, seeds, name):
         # evaluation
         acc_2 = metrics.accuracy_score(y_test, y_pred_2.T)
         f1_2 = metrics.f1_score(y_test, y_pred_2.T, average='macro')
-        
-        # for i, y_pred2 in enumerate(model2.staged_predict(x_test)):
-        #     # clf.loss_ assumes that y_test[i] in {0, 1}
-        #     test_deviance2[i] = model2.loss_(y_test, y_pred2)
-        
-        # print(test_deviance1)
-        # print(test_deviance2)
-        
-        # zz = stats.kstest(test_deviance1, test_deviance2)
-        # print(zz)
-        
-        # fig = plt.figure(figsize=(6, 6))
-        # plt.plot(np.arange(100) + 1, test_deviance1, "r-", label="Model1 Test Set Deviance")
-        # plt.plot(np.arange(100) + 1, test_deviance2, "b-", label="Model2 Test Set Deviance")
-        # plt.legend(loc="upper right")
-        # plt.xlabel("Boosting Iterations")
-        # plt.ylabel("Deviance")
-        # fig.tight_layout()
-        # plt.show()
+
         
         if acc_1 > acc_2:
             
@@ -172,7 +169,7 @@ def CES_method(data, ini_train_size, win_size, seeds, name):
             x1 = np.vstack((x1, x_test))
             y1 = np.hstack((y1, y_test))
             
-            
+            # avoid 1 class
             label1 = np.argmax(y1)
             label2 = np.argmin(y1)
             
@@ -180,18 +177,31 @@ def CES_method(data, ini_train_size, win_size, seeds, name):
             label_x = np.vstack((x1[label1, :], x1[label2, :]))
             label_y = np.hstack((y1[label1], y1[label2]))
             
-            
-            if x1.shape[0] > 5000:
-                # x1 = x1[:-5000, :]
-                # y1 = y1[:-5000]
+
+            if x1.shape[0] > 1000:
                 
-                x1 = np.vstack((label_x, x1[:-5000, :]))
-                y1 = np.hstack((label_y, y1[:-5000]))
+                if acc_1 >= acc1_pre:
+                    
+                    x1 = x1[-1000:, :]
+                    y1 = y1[-1000:]
+                    
+                    # x1 = np.vstack((label_x, x1[-1000:, :]))
+                    # y1 = np.hstack((label_y, y1[-1000:]))
+                    
+                else:
                 
+                    x1 = x_test
+                    y1 = y_test
+                    
+                    # x1 = np.vstack((label_x, x_test))
+                    # y1 = np.hstack((label_y, y_test))
             
+            # print('y1', y1.shape[0], y1)
             # retrain the model 1
             model1 = GradientBoostingClassifier(subsample = 0.8)
             model1.fit(x1, y1)
+            
+            acc1_pre = acc_1
             
             batch_acc.append(acc_1)
             batch_f1.append(f1_1)
@@ -203,23 +213,17 @@ def CES_method(data, ini_train_size, win_size, seeds, name):
             if idx == 0:
                 
                 # combine historical data samples
-                
-                # x2 = x_test
-                # y2 = y_test
-                
                 x2 = np.vstack((x2, x_test))
                 y2 = np.hstack((y2, y_test))
                 
             else:
                 
                 # combine normal historical data samples
-                # x2 = x_test[idx:, :]
-                # y2 = y_test[idx:]
-                
                 x2 = np.vstack((x2, x_test[idx:, :]))
                 y2 = np.hstack((y2, y_test[idx:]))   
-            
-            
+                    
+                
+            # avoid 1 class
             label1 = np.argmax(y2)
             label2 = np.argmin(y2)
             
@@ -228,18 +232,30 @@ def CES_method(data, ini_train_size, win_size, seeds, name):
             label_y = np.hstack((y2[label1], y2[label2]))
             
             
-            if x2.shape[0] > 5000:
-                # x2 = x2[:-5000, :]
-                # y2 = y2[:-5000]            
+            if x2.shape[0] > 1000:
                 
-                x2 = np.vstack((label_x, x2[:-5000, :]))
-                y2 = np.hstack((label_y, y2[:-5000]))
+                if acc_2 >= acc2_pre:
+                    
+                    x2 = x2[-1000:, :]
+                    y2 = y2[-1000:]
+                    
+                    # x2 = np.vstack((label_x, x2[-1000:, :]))
+                    # y2 = np.hstack((label_y, y2[-1000:]))
+                    
+                else:
                 
-
-            
+                    x2 = x_test
+                    y2 = y_test
+                    
+                    # x2 = np.vstack((label_x, x_test))
+                    # y2 = np.hstack((label_y, y_test))
+                
+            # print('y2', y2.shape[0], y2)
             # retrain the model 2
             model2 = GradientBoostingClassifier(subsample = 0.8)
-            model2.fit(x2, y2)    
+            model2.fit(x2, y2)
+            
+            acc2_pre = acc_2    
                 
             batch_acc.append(acc_2)
             batch_f1.append(f1_2)
@@ -250,6 +266,7 @@ def CES_method(data, ini_train_size, win_size, seeds, name):
     Y = data[ini_train_size:,-1]
     acc = metrics.accuracy_score(Y, pred)
     f1 = metrics.f1_score(Y, pred, average = 'macro')
+    # f1 = metrics.f1_score(Y, pred, average = 'weighted')
 
     print("acc:",acc)
     print("f1:",f1)
@@ -269,10 +286,13 @@ def CES_method(data, ini_train_size, win_size, seeds, name):
 if __name__ == '__main__':
     
     
-    path = 'realworld data/'
+   # path = 'C:/Users/Administrator/Desktop/Work4/data/realworld data/'
+    path = '/home/kunwang/Data/Work4/data/realworld data/'
     
-    # datasets = ['powersupply']
-    datasets = ['Poker-Hand']
+    # datasets = ['powersupply', 'Poker-Hand']
+    # datasets = ['INSECTSa', 'INSECTSg']
+    datasets = ['INSECTSi']
+    # datasets = ['covtype']
 
     
     
@@ -312,6 +332,25 @@ if __name__ == '__main__':
     
     
     
+    
+'''   
+a = [1,3,2,3,0,3,4,3,4,11,5,1,14,9,5,8,57,8,17,24,31,4,4,29]
+b = [1,5,14,16,25,45,51,62,76,64,78,64,128,130,197,150,203,366,492,734,865,977,979,1580]
+plt.plot(a, label = 'Confirm', marker = 'o')
+plt.plot(b, label = 'Asymptomatic', marker = '*')
+plt.xlabel('Time point')
+plt.ylabel('Number of cases')
+plt.xlim(1, 25)
+# plt.ylim(0.2, 0.9)
+plt.legend(loc = 'upper left')
+plt.show()
+'''
+
+
+
+
+
+
 
 
 

@@ -68,6 +68,13 @@ def CS_method(data, ini_train_size, win_size, seeds, name):
     y_pred_cum = y_pred_ini
     y_test_cum = y2
     
+    fre = 0
+    
+    acc1_pre = 0
+    acc2_pre = 0
+    acc_df = []
+    term = 0
+    
     
     # model learning
     for train_index, test_index in tqdm(kf.split(stream), total = kf.get_n_splits(), desc = "#batch"):
@@ -80,16 +87,16 @@ def CS_method(data, ini_train_size, win_size, seeds, name):
         y_pred_1 = model1.predict(x_test)
         
         acc_1 = metrics.accuracy_score(y_test, y_pred_1.T)
-        f1_1 = metrics.f1_score(y_test, y_pred_1.T, average='macro')
+        f1_1 = metrics.f1_score(y_test, y_pred_1.T, average='weighted')
         
         
         # test model 2
         y_pred_2 = model2.predict(x_test)
         
         acc_2 = metrics.accuracy_score(y_test, y_pred_2.T)
-        f1_2 = metrics.f1_score(y_test, y_pred_2.T, average='macro')
+        f1_2 = metrics.f1_score(y_test, y_pred_2.T, average='weighted')
         
-        
+
         # compare the result
         if acc_1 > acc_2:
             
@@ -99,23 +106,46 @@ def CS_method(data, ini_train_size, win_size, seeds, name):
             y_pred_cum = np.hstack((y_pred_cum, y_pred_1))
             # y_test_cum = np.hstack((y_test_cum, y_test))
             
-            # cum_acc.append(metrics.accuracy_score(y_test_cum, y_pred_cum.T))
-            # cum_f1.append(metrics.f1_score(y_test_cum, y_pred_cum.T, average='macro'))
             
             # combine historical chunk
             x1 = np.vstack((x1, x_test))
             y1 = np.hstack((y1, y_test))
+            
+            
+            # avoid 1 class
+            label1 = np.argmax(y1)
+            label2 = np.argmin(y1)
+            
+            
+            label_x = np.vstack((x1[label1, :], x1[label2, :]))
+            label_y = np.hstack((y1[label1], y1[label2]))
+            
+            
+            if x1.shape[0] > 1000:
+                
+                if acc_1 >= acc1_pre:
+                    
+                    # x1 = x1[-1000:, :]
+                    # y1 = y1[-1000:]
+                    
+                    x1 = np.vstack((label_x, x1[-1000:, :]))
+                    y1 = np.hstack((label_y, y1[-1000:]))
+                    
+  
+                else:
+                
+                    # x1 = x1_test
+                    # y1 = y1_test
+                    
+                    x1 = np.vstack((label_x, x_test))
+                    y1 = np.hstack((label_y, y_test))
+            
 
-            
-            if x1.shape[0] > 5000:
-                x1 = x1[:-5000, :]
-                y1 = y1[:-5000]
-            
-            
             # retrain the model 1
             model1 = GradientBoostingClassifier(subsample = 0.8)
             model1.fit(x1, y1)
-
+            
+            acc1_pre = acc_1
 
         
         else:
@@ -125,25 +155,50 @@ def CS_method(data, ini_train_size, win_size, seeds, name):
             y_pred_cum = np.hstack((y_pred_cum, y_pred_2))
             # y_test_cum = np.hstack((y_test_cum, y_test))
             
-            # cum_acc.append(metrics.accuracy_score(y_test_cum, y_pred_cum.T))
-            # cum_f1.append(metrics.f1_score(y_test_cum, y_pred_cum.T, average='macro'))
             
             # combine historical chunk
             x2 = np.vstack((x2, x_test))
             y2 = np.hstack((y2, y_test))
             
-            if x2.shape[0] > 5000:
-                x2 = x2[:-5000, :]
-                y2 = y2[:-5000]
+            
+            # avoid 1 class
+            label1 = np.argmax(y2)
+            label2 = np.argmin(y2)
             
             
+            label_x = np.vstack((x2[label1, :], x2[label2, :]))
+            label_y = np.hstack((y2[label1], y2[label2]))
+            
+            if x2.shape[0] > 1000:
+                
+                if acc_2 >= acc2_pre:
+                    
+                    # x2 = x2[-1000:, :]
+                    # y2 = y2[-1000:]
+                    
+                    x2 = np.vstack((label_x, x2[-1000:, :]))
+                    y2 = np.hstack((label_y, y2[-1000:]))
+                    
+                else:
+                
+                    # x2 = x_test
+                    # y2 = y_test
+                    
+                    x2 = np.vstack((label_x, x_test))
+                    y2 = np.hstack((label_y, y_test))
+                
+                
             # retrain the model 2
             model2 = GradientBoostingClassifier(subsample = 0.8)
             model2.fit(x2, y2)
             
+            acc2_pre = acc_2
+            
+            
     Y = data[ini_train_size:,-1]
     acc = metrics.accuracy_score(Y, y_pred_cum)
-    f1 = metrics.f1_score(Y, y_pred_cum, average = 'macro')
+    # f1 = metrics.f1_score(Y, y_pred_cum, average = 'macro')
+    f1 = metrics.f1_score(Y, y_pred_cum, average = 'weighted')
 
     print("acc:",acc)
     print("f1:",f1)
@@ -154,7 +209,6 @@ def CS_method(data, ini_train_size, win_size, seeds, name):
     result[:, 1] = Y
     np.savetxt(name + str(seeds) +'.out', result, delimiter=',')          
     
-    # print('acc', np.mean(batch_acc))
 
     return acc, f1
     
@@ -165,11 +219,13 @@ def CS_method(data, ini_train_size, win_size, seeds, name):
 if __name__ == '__main__':
     
     
-    path = 'realworld data/'
+   # path = 'C:/Users/Administrator/Desktop/Work4/data/realworld data/'
+    path = '/home/kunwang/Data/Work4/data/realworld data/'
     
-    datasets = ['powersupply']
-    # datasets = ['Poker-Hand']
-
+    # datasets = ['powersupply', 'Poker-Hand']
+    # datasets = ['INSECTSa','INSECTSg']
+    datasets = ['INSECTSi']
+    # datasets = ['covtype']
 
     
     for i in range (len(datasets)):

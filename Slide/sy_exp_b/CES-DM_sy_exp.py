@@ -19,6 +19,7 @@ import time
 
 
 
+
 # load .arff dataset
 def load_arff(path, dataset_name, seeds):
     file_path = path + dataset_name + '/'+ dataset_name + str(seeds) + '.arff'
@@ -66,12 +67,11 @@ def drift_detection(y_pred, y_test):
     
         
     
-
-def CES_method(data, ini_train_size, win_size, seeds, name):
+def DM_method(data, ini_train_size, win_size, seeds, name):
     
-    np.random.seed(seeds)
-    
+    np.random.seed(0)
     data = data.values
+    
     
     x1 = data[0:ini_train_size, :-1]
     y1 = data[0:ini_train_size, -1]
@@ -86,7 +86,6 @@ def CES_method(data, ini_train_size, win_size, seeds, name):
     
     
     # build model 1 for normal data learning
-    # model1 = GradientBoostingRegressor(n_estimators = 100, subsample = 0.8)
     model1 = GradientBoostingRegressor(subsample = 0.8)
     model1.fit(x1, y1)
     
@@ -96,23 +95,25 @@ def CES_method(data, ini_train_size, win_size, seeds, name):
     model2.fit(x1, y1)
     
     
-   
-    
     # k-fold
     kf = KFold(int((data.shape[0] - ini_train_size) / win_size))
     stream = data[ini_train_size:, :]
-    # pred = np.zeros(stream.shape[0])
+
     
     batch_acc = []
     batch_f1=[]
+    acc1_pre = 0
     acc2_pre = 0
+    acc_df = []
+    term = 0
+    
     
     test_deviance1 = np.zeros((100,), dtype = np.float64)
     test_deviance2 = np.zeros((100,), dtype = np.float64)
     test_deviance2_former = np.zeros((100,), dtype = np.float64)
     test_deviance2_latter = np.zeros((100,), dtype = np.float64)
-    
     pred = np.empty(0)
+    
     
     # model learning
     for train_index, test_index in tqdm(kf.split(stream), total = kf.get_n_splits(), desc = "#batch"):
@@ -127,9 +128,9 @@ def CES_method(data, ini_train_size, win_size, seeds, name):
 
         
         # drift detection
-        # idx = drift_detection(y_pred_ini, y_test)
         idx_warning, idx_drift = drift_detection(y_pred_ini, y_test)
         # print(idx_warning, idx_drift)
+        
         
         model_ini = GradientBoostingRegressor(subsample = 0.8)
         model_ini.fit(x_test, y_test)
@@ -144,6 +145,7 @@ def CES_method(data, ini_train_size, win_size, seeds, name):
         high_warning_idx = []
         low_warning_idx = []
         high_warning = 0
+        
         if idx_warning > 1 and idx_warning < idx_drift:
             normal_zone_acc = metrics.accuracy_score(y_test[0:idx_warning-1], y_pred_1.T[0:idx_warning-1])
             
@@ -152,8 +154,7 @@ def CES_method(data, ini_train_size, win_size, seeds, name):
                 warning_zone_acc = metrics.accuracy_score(y_test[0:i], y_pred_1[0:i])
                 if warning_zone_acc > normal_zone_acc:
                     high_warning = i                 
-                    
-        
+                          
         idx_drift = high_warning + 1
 
         
@@ -161,9 +162,6 @@ def CES_method(data, ini_train_size, win_size, seeds, name):
         acc_1 = metrics.accuracy_score(y_test, y_pred_1.T)
         f1_1 = metrics.f1_score(y_test, y_pred_1.T, average='macro')
         
-        # for i, y_pred1 in enumerate(model1.staged_predict(x_test)):
-        #     # clf.loss_ assumes that y_test[i] in {0, 1}
-        #     test_deviance1[i] = model1.loss_(y_test, y_pred1)
             
         # test model2
         y_pred_2 = model2.predict(x_test)
@@ -175,34 +173,39 @@ def CES_method(data, ini_train_size, win_size, seeds, name):
         f1_2 = metrics.f1_score(y_test, y_pred_2.T, average='macro')
         
         
-        
-        # for i, y_pred2 in enumerate(model2.staged_predict(x_test)):
-        #     # clf.loss_ assumes that y_test[i] in {0, 1}
-            # test_deviance2[i] = model2.loss_(y_test, y_pred2)
-        
-        # print(test_deviance1)
-        # print(test_deviance2)
-        
-        # zz = stats.kstest(test_deviance1, test_deviance2)
-        # print(zz)
-        
-        # fig = plt.figure(figsize=(6, 6))
-        # plt.plot(np.arange(100) + 1, test_deviance1, "r-", label="Model1 Test Set Deviance")
-        # plt.plot(np.arange(100) + 1, test_deviance2, "b-", label="Model2 Test Set Deviance")
-        # plt.legend(loc="upper right")
-        # plt.xlabel("Boosting Iterations")
-        # plt.ylabel("Deviance")
-        # fig.tight_layout()
-        # plt.show()
-        
+        # segmentation
         if acc_1 > acc_2:
                 
+            
             x1 = np.vstack((x1, x_test))
             y1 = np.hstack((y1, y_test))
             
-            if x1.shape[0] > 5000:
-                x1 = x1[:-5000, :]
-                y1 = y1[:-5000]
+            acc_df.append(acc_1 - acc1_pre)
+            
+                   
+            if x1.shape[0] > 1000:
+                
+                acc_df = acc_df[1:]
+                lower, upper = stats.norm.interval(alpha=0.95, loc=np.mean(acc_df[-11:-1]), scale=stats.sem(acc_df[-11:-1]))
+                # print(lower)
+              
+                if term > lower:
+                    term = lower
+                                   
+                if acc_1 - acc1_pre >= term:
+                # if acc_1 + 0.1 >= acc1_pre:
+                                
+                    x1 = x1[-1000:, :]
+                    y1 = y1[-1000:]
+                    
+                    # print('acc_up', lower, acc_1-acc1_pre)
+                    
+                else:
+                    
+                    x1 = x_test
+                    y1 = y_test
+                    
+                    # print('acc_down', lower, acc_1-acc1_pre)
                 
             
             # retrain the model 1
@@ -213,13 +216,15 @@ def CES_method(data, ini_train_size, win_size, seeds, name):
             batch_f1.append(f1_1)
             
             pred = np.hstack((pred, y_pred_1))
+            
+            acc1_pre = acc_1
         
         else:
             
             x2 = x_test
             y2 = y_test
-                
-    
+  
+
             # retrain the model 2
             model2 = GradientBoostingRegressor(subsample = 0.8)
             model2.fit(x2, y2)    
@@ -232,8 +237,7 @@ def CES_method(data, ini_train_size, win_size, seeds, name):
             acc2_pre = acc_2
             
             
-    
-    
+    # get prediction results
     Y = data[ini_train_size:,-1]
     acc = metrics.accuracy_score(Y, pred)
     f1 = metrics.f1_score(Y, pred, average = 'macro')
@@ -247,7 +251,6 @@ def CES_method(data, ini_train_size, win_size, seeds, name):
     result[:, 1] = Y
     np.savetxt(name + str(seeds) +'.out', result, delimiter=',') 
 
-
     return acc, f1
     
 
@@ -255,12 +258,12 @@ def CES_method(data, ini_train_size, win_size, seeds, name):
     
 if __name__ == '__main__':
     
-
-    path = 'synthetic data/'
     
-    datasets = ['SEAa', 'RTG', 'RBF', 'RBFr', 'AGRa', 'HYP']
-
+   # path = 'C:/Users/Administrator/Desktop/Work4/data/synthetic data/'
+    path = '/home/kunwang/Data/Work4/data/synthetic data/'
     
+    datasets = ['SEAa', 'RTG', 'RBF', 'RBFr', 'AGRa', 'HYP', 'Sine', 'STAGGER']
+
     
     for i in range (len(datasets)):
         
@@ -274,7 +277,7 @@ if __name__ == '__main__':
             
             print(datasets[i], j)
             time_start = time.time()
-            ACC, F1 = CES_method(data, ini_train_size = 100, win_size = 100, seeds = j, name = datasets[i])
+            ACC, F1 = DM_method(data, ini_train_size = 100, win_size = 100, seeds = j, name = datasets[i])
             time_end = time.time()
             Time = time_end - time_start
             print('time cost:', Time, 's')
@@ -284,21 +287,24 @@ if __name__ == '__main__':
             time_total.append(Time)
         
         
-        # print('-----------------------------------------')
-        # print('AVE Accuracy:', np.mean(acc_total))
-        # print('STD Accuracy:', np.std(acc_total))
-        # print('-----------------------------------------')
-        # print('AVE F1:', np.mean(f1_total))
-        # print('STD F1:', np.std(f1_total))
-        # print('-----------------------------------------')
-        # print('AVE Time:', np.mean(time_total))
-        # print('STD Time:', np.std(time_total))
-        # print('-----------------------------------------') 
+        print('-----------------------------------------')
+        print('AVE Accuracy:', np.mean(acc_total))
+        print('STD Accuracy:', np.std(acc_total))
+        print('-----------------------------------------')
+        print('AVE F1:', np.mean(f1_total))
+        print('STD F1:', np.std(f1_total))
+        print('-----------------------------------------')
+        print('AVE Time:', np.mean(time_total))
+        print('STD Time:', np.std(time_total))
+        print('-----------------------------------------') 
+        
     
     
     
-    
-    
+
+
+
+
 
 
 
